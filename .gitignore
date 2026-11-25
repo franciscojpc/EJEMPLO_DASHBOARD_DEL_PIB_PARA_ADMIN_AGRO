@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+tabulados_PIBT.zip
+.streamlit/secrets.toml
+.claude/
