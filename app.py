@@ -69,6 +69,7 @@ COLORS = {
 AGRO_CHART_KEYS = ["agricultura", "ganaderia", "forestal", "pesca"]
 AGRO_TABLE_KEYS = AGRO_CHART_KEYS + ["serv_agro"]
 SECTOR_KEYS = ["primarias", "secundarias", "terciarias"]
+STATS_KEYS = ["pib", "primarias"] + AGRO_TABLE_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +321,139 @@ def stacked_share(shares: pd.DataFrame, year: int,
     )
     return style_fig(fig, title=f"COMPOSICIÓN DEL VAB // {year}",
                      height=height)
+
+
+def descriptive_tables(real_q: pd.DataFrame, var_q: pd.DataFrame,
+                       keys: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Descriptive statistics for levels and annual growth."""
+    level_rows = []
+    growth_rows = []
+    for key in keys:
+        levels = real_q.loc[real_q.key == key, "valor"].dropna()
+        growth = var_q.loc[var_q.key == key, "valor"].dropna()
+        if levels.empty:
+            continue
+        mean = float(levels.mean())
+        std = float(levels.std(ddof=1)) if len(levels) > 1 else np.nan
+        level_rows.append(
+            {
+                "Serie": SHORT[key],
+                "N": int(levels.size),
+                "Media": fmt_num(mean / 1e6, 2),
+                "Mediana": fmt_num(levels.median() / 1e6, 2),
+                "Desv. est.": fmt_num(std / 1e6, 2),
+                "CV (%)": fmt_num(std / mean * 100, 1) if mean else "—",
+                "Mín.": fmt_num(levels.min() / 1e6, 2),
+                "P25": fmt_num(levels.quantile(0.25) / 1e6, 2),
+                "P75": fmt_num(levels.quantile(0.75) / 1e6, 2),
+                "Máx.": fmt_num(levels.max() / 1e6, 2),
+            }
+        )
+        if not growth.empty:
+            growth_rows.append(
+                {
+                    "Serie": SHORT[key],
+                    "N": int(growth.size),
+                    "Media": fmt_pct(growth.mean()),
+                    "Mediana": fmt_pct(growth.median()),
+                    "Desv. est.": (
+                        fmt_num(growth.std(ddof=1), 1) + " pp"
+                        if len(growth) > 1 else "—"
+                    ),
+                    "Mín.": fmt_pct(growth.min()),
+                    "Máx.": fmt_pct(growth.max()),
+                }
+            )
+    return pd.DataFrame(level_rows), pd.DataFrame(growth_rows)
+
+
+def circle_pack_chart(df: pd.DataFrame, shares: pd.DataFrame,
+                      year: int) -> None:
+    """Matplotlib circles: area proportional to each sector's VAB share."""
+    if year not in shares.index:
+        st.info("No hay composición sectorial para el año elegido.")
+        return
+    row = shares.loc[year]
+    levels = df[
+        (df.serie == "real")
+        & (df.bloque == "nivel")
+        & (df.periodo == "Anual")
+        & (df.anio == year)
+        & (df.key.isin(SECTOR_KEYS))
+    ].set_index("key")["valor"]
+    values = {key: float(row[key]) for key in SECTOR_KEYS}
+    max_share = max(values.values())
+    radii = {
+        key: 4.0 * np.sqrt(values[key] / max_share)
+        for key in SECTOR_KEYS
+    }
+    order = sorted(SECTOR_KEYS, key=lambda key: values[key], reverse=True)
+    positions: dict[str, tuple[float, float]] = {}
+    x = 0.0
+    gap = 0.7
+    for index, key in enumerate(order):
+        radius = radii[key]
+        if index == 0:
+            positions[key] = (0.0, 0.0)
+            x = radius
+        else:
+            previous = order[index - 1]
+            x = positions[previous][0] + radii[previous] + gap + radius
+            positions[key] = (x, 0.0)
+
+    left = min(px - radii[key] for key, (px, _py) in positions.items())
+    right = max(px + radii[key] for key, (px, _py) in positions.items())
+    max_radius = max(radii.values())
+
+    with matrix_style():
+        fig, ax = plt.subplots(figsize=(11, 5.4), dpi=130)
+        for key in order:
+            px, py = positions[key]
+            radius = radii[key]
+            color = COLORS[key]
+            ax.add_patch(
+                plt.Circle((px, py), radius, facecolor=color,
+                           edgecolor="none", alpha=0.18, zorder=1)
+            )
+            ax.add_patch(
+                plt.Circle((px, py), radius, facecolor="none",
+                           edgecolor=color, lw=2.4, zorder=2)
+            )
+            level = float(levels.get(key, np.nan)) / 1e6
+            label = (
+                f"{SHORT[key]}\n{fmt_num(values[key], 1)}%\n"
+                f"{fmt_num(level, 1)} billones"
+            )
+            if radius >= 2.2:
+                ax.text(px, py, label, ha="center", va="center",
+                        color=PALETTE["text_primary"], fontsize=10,
+                        linespacing=1.5, zorder=3)
+            else:
+                ax.annotate(
+                    label, xy=(px, py + radius),
+                    xytext=(px, py + radius + 1.2),
+                    textcoords="data", ha="center", va="bottom",
+                    color=PALETTE["text_primary"], fontsize=9,
+                    linespacing=1.4,
+                    arrowprops={"arrowstyle": "-", "color": color, "lw": 1},
+                    zorder=3,
+                )
+        ax.set_xlim(left - 0.6, right + 0.6)
+        ax.set_ylim(-max_radius - 0.9, max_radius + 0.9)
+        ax.set_aspect("equal")
+        ax.set_axis_off()
+        ax.set_title(
+            f"PESO DE LOS SECTORES // % DEL VAB · {year}",
+            loc="left", color=PALETTE["phosphor"], fontsize=12, pad=12,
+        )
+        ax.text(
+            left, -max_radius - 0.55,
+            "Área de cada círculo proporcional a su participación en el VAB.",
+            color=PALETTE["text_secondary"], fontsize=8.5,
+        )
+        fig.tight_layout()
+        st.pyplot(fig, width="stretch")
+        plt.close(fig)
 
 
 def heatmap_growth(df: pd.DataFrame, key: str, title: str,
@@ -590,9 +724,16 @@ def main() -> None:
         & (df.periodo.isin(Q))
         & (df.anio.between(start_year, end_year))
     ]
+    var_q = df[
+        (df.serie == "real")
+        & (df.bloque == "var_anual")
+        & (df.periodo.isin(Q))
+        & (df.anio.between(start_year, end_year))
+    ]
 
     tabs = st.tabs(
-        ["Panorama", "Agro", "Estructura", "Ciclo", "Precios", "Datos"]
+        ["Panorama", "Agro", "Estructura", "Ciclo", "Precios",
+         "Datos y stats"]
     )
 
     # Panorama ------------------------------------------------------------
@@ -770,6 +911,17 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
+            st.markdown("##### Peso de los sectores")
+            circle_year = st.selectbox(
+                "Año del gráfico de círculos",
+                options=list(shares.index[::-1]),
+                index=0,
+                key="circle_year",
+                help="El área de cada círculo es proporcional a su "
+                     "participación en el VAB.",
+            )
+            circle_pack_chart(df, shares, int(circle_year))
+
     # Ciclo ---------------------------------------------------------------
     with tabs[3]:
         cycle = df[
@@ -914,13 +1066,56 @@ def main() -> None:
 
     # Datos ---------------------------------------------------------------
     with tabs[5]:
-        data = real_q[real_q.key.isin(
-            ["pib", "primarias", "agricultura", "ganaderia",
-             "forestal", "pesca", "serv_agro"]
-        )].copy()
-        if data.empty:
+        if real_q.empty:
             st.info("No hay datos para la ventana seleccionada.")
         else:
+            st.markdown("##### Estadística descriptiva")
+            levels_stats, growth_stats = descriptive_tables(
+                real_q, var_q, STATS_KEYS
+            )
+            if not levels_stats.empty:
+                st.markdown(
+                    "###### Niveles trimestrales (billones de pesos de 2018)"
+                )
+                st.dataframe(levels_stats, hide_index=True,
+                             width="stretch")
+                st.caption(
+                    "N = trimestres con dato · CV = desviación estándar / "
+                    "media · P25/P75 = percentiles 25 y 75."
+                )
+            if not growth_stats.empty:
+                st.markdown("###### Variación anual (%)")
+                st.dataframe(growth_stats, hide_index=True,
+                             width="stretch")
+
+            pib_levels = real_q.loc[real_q.key == "pib", "valor"] / 1e6
+            prim_levels = (
+                real_q.loc[real_q.key == "primarias", "valor"] / 1e6
+            )
+            if len(pib_levels) > 1 and len(prim_levels) > 1:
+                pib_mean = float(pib_levels.mean())
+                prim_mean = float(prim_levels.mean())
+                pib_cv = float(pib_levels.std() / pib_mean * 100)
+                prim_cv = float(prim_levels.std() / prim_mean * 100)
+                comparison = "más" if prim_cv > pib_cv else "menos"
+                st.markdown(
+                    f'<div class="mx-note">En la ventana '
+                    f"{start_year}–{end_year}, el PIB total promedia "
+                    f"{fmt_num(pib_mean, 1)} billones "
+                    f"(CV {fmt_num(pib_cv, 1)}%) y las actividades "
+                    f"primarias {fmt_num(prim_mean, 2)} billones "
+                    f"(CV {fmt_num(prim_cv, 1)}%); en niveles, el agro es "
+                    f"{comparison} volátil. El CV mezcla tendencia y ciclo: "
+                    "úsalo como resumen, no como medida pura de riesgo."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("##### Tabla de datos")
+            data = real_q[real_q.key.isin(
+                ["pib", "primarias", "agricultura", "ganaderia",
+                 "forestal", "pesca", "serv_agro"]
+            )].copy()
             data["etiqueta"] = data["key"].map(SHORT)
             wide = data.pivot_table(
                 index=["fecha", "anio", "periodo", "estatus"],

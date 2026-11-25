@@ -13,11 +13,14 @@ Construido con **Python + Streamlit + Plotly + Matplotlib + Pandas**.
 - **Agro:** evolución de los componentes agropecuarios, crecimiento anual y
   participación dentro de las actividades primarias.
 - **Estructura:** composición del valor agregado bruto (primarias,
-  secundarias, terciarias) y su evolución.
+  secundarias, terciarias), su evolución y un gráfico de círculos con área
+  proporcional al peso de cada sector.
 - **Ciclo:** mapas de calor de variación anual por año y trimestre para el PIB
   total y las actividades primarias.
 - **Precios:** PIB nominal vs real y deflactor implícito (2018 = 100).
-- **Datos:** tabla descargable en CSV y diccionario de datos.
+- **Datos y stats:** estadística descriptiva (media, mediana, desviación
+  estándar, CV, percentiles, mínimos/máximos y variación anual), tabla
+  descargable en CSV y diccionario de datos.
 - Filtros de ventana temporal, selección de componentes agropecuarios y lluvia
   digital opcional.
 
@@ -80,6 +83,12 @@ tabulados_PIBT/        # datos fuente del INEGI
   primaria del KPI se calcula sobre el PIB total.
 - Los mapas de calor usan una escala divergente verde–magenta centrada en cero,
   acotada al percentil 95 para evitar que los outliers de 2020 aplanen el resto.
+- La estadística descriptiva se calcula sobre los trimestres de la ventana
+  seleccionada: media, mediana, desviación estándar, coeficiente de variación,
+  percentiles 25/75 y mínimos/máximos en billones de pesos de 2018; la
+  variación anual resume el bloque de variación porcentual del INEGI.
+- El gráfico de círculos usa el área de cada círculo para representar la
+  participación de cada sector en el VAB del año elegido.
 - Todo el procesamiento ocurre en memoria; los Excel no se modifican.
 
 ## Limitaciones
